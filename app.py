@@ -90,13 +90,17 @@ def detect_opening(game):
     
     board = game.board()
     moves = []
+    san_moves = []
+    
     for move in list(game.mainline_moves())[:6]:
+        # Convert to SAN BEFORE pushing the move
+        san_moves.append(board.san(move))
         moves.append(move)
         board.push(move)
     
     # Basic opening detection
-    if len(moves) >= 2:
-        first_moves = " ".join([board.san(m) for m in moves[:4]])
+    if len(san_moves) >= 2:
+        first_moves = " ".join(san_moves[:4])
         
         if "e4 e5" in first_moves:
             return "Open Game (e4 e5)"
