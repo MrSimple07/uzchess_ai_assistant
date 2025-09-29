@@ -8,7 +8,7 @@ from collections import Counter
 import json
 
 # Configure Gemini API
-GEMINI_API_KEY = "AIzaSyDZ6e-UJg2Pf8l4d39MA7g7FHqKXzIh7vQ"
+GEMINI_API_KEY = "AIzaSyCco0x4p-v3bd-er7g39dVapAey1fs1sIM"
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
