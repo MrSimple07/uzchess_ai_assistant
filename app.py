@@ -8,9 +8,9 @@ from collections import Counter
 import json
 
 # Configure Gemini API
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
+GEMINI_API_KEY = "AIzaSyDZ6e-UJg2Pf8l4d39MA7g7FHqKXzIh7vQ"
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # ============= GAME ANALYSIS =============
 
