@@ -81,47 +81,16 @@ def parse_pgn_content(pgn_content):
     return games
 
 def detect_opening(game):
-    """Detect opening from ECO code or first moves"""
-    eco = game.headers.get("ECO", "")
+    """Detect opening from ECO code or Opening header"""
     opening = game.headers.get("Opening", "")
+    eco = game.headers.get("ECO", "")
     
     if opening:
         return opening
-    
-    board = game.board()
-    moves = []
-    san_moves = []
-    
-    for move in list(game.mainline_moves())[:6]:
-        # Convert to SAN BEFORE pushing the move
-        san_moves.append(board.san(move))
-        moves.append(move)
-        board.push(move)
-    
-    # Basic opening detection
-    if len(san_moves) >= 2:
-        first_moves = " ".join(san_moves[:4])
-        
-        if "e4 e5" in first_moves:
-            return "Open Game (e4 e5)"
-        elif "e4 c5" in first_moves:
-            return "Sicilian Defense"
-        elif "e4 e6" in first_moves:
-            return "French Defense"
-        elif "e4 c6" in first_moves:
-            return "Caro-Kann Defense"
-        elif "d4 d5" in first_moves:
-            return "Queen's Pawn Game"
-        elif "d4 Nf6" in first_moves:
-            if "c4" in first_moves:
-                return "Indian Defense"
-            return "Indian Game"
-        elif "Nf3" in first_moves and "d4" not in first_moves:
-            return "Reti Opening"
-        elif "c4" in first_moves and "d4" not in first_moves:
-            return "English Opening"
-    
-    return "Other Opening"
+    elif eco:
+        return f"ECO {eco}"
+    else:
+        return "Unknown Opening"
 
 def analyze_game_detailed(game, username):
     board = game.board()
@@ -140,6 +109,19 @@ def analyze_game_detailed(game, username):
     
     result = game.headers.get("Result", "*")
     opening = detect_opening(game)
+    
+    # Determine user result
+    user_won = None
+    user_result = None
+    if user_color is not None and result != "*":
+        if result == "1-0":
+            user_won = (user_color == chess.WHITE)
+            user_result = "win" if user_won else "loss"
+        elif result == "0-1":
+            user_won = (user_color == chess.BLACK)
+            user_result = "win" if user_won else "loss"
+        elif result == "1/2-1/2":
+            user_result = "draw"
     
     material_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
     
@@ -190,7 +172,8 @@ def analyze_game_detailed(game, username):
         'mistakes': mistakes,
         'opening': opening,
         'result': result,
-        'user_color': user_color
+        'user_color': user_color,
+        'user_result': user_result
     }
 
 def categorize_mistakes(all_mistakes):
@@ -247,35 +230,8 @@ def fetch_lichess_puzzles(count=5):
     except:
         pass
     
-    # Add some default tactical puzzles if we can't fetch from API
-    default_puzzles = [
-        {
-            'id': 'default_1',
-            'fen': 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 0 1',
-            'moves': ['h5f7'],
-            'rating': 1200,
-            'themes': ['fork', 'tactics']
-        },
-        {
-            'id': 'default_2',
-            'fen': 'r1bqk2r/ppp2ppp/2n5/3np1N1/1b1P4/2N5/PPP1QPPP/R1B1KB1R w KQkq - 0 1',
-            'moves': ['g5f7'],
-            'rating': 1300,
-            'themes': ['fork', 'knight']
-        },
-        {
-            'id': 'default_3',
-            'fen': '6k1/5ppp/8/8/8/8/2R2PPP/6K1 w - - 0 1',
-            'moves': ['c2c8'],
-            'rating': 1000,
-            'themes': ['endgame', 'rook']
-        }
-    ]
-    
-    while len(puzzles) < count:
-        puzzles.append(default_puzzles[len(puzzles) % len(default_puzzles)])
-    
-    return puzzles[:count]
+    # If we couldn't fetch puzzles, return empty list
+    return puzzles
 
 def create_board_svg(fen, size=400):
     """Create SVG representation of chess position"""
@@ -363,31 +319,23 @@ def analyze_games(username, pgn_file):
         all_mistakes.extend(analysis['mistakes'])
         
         opening = analysis['opening']
-        result = analysis['result']
+        user_result = analysis.get('user_result')
         user_color = analysis['user_color']
         
         opening_stats[opening]['total'] += 1
         
-        if user_color is not None:
+        if user_result == 'win':
+            opening_stats[opening]['wins'] += 1
             color_key = 'white' if user_color == chess.WHITE else 'black'
-            
-            if result == "1-0":
-                if user_color == chess.WHITE:
-                    opening_stats[opening]['wins'] += 1
-                    color_stats[color_key]['wins'] += 1
-                else:
-                    opening_stats[opening]['losses'] += 1
-                    color_stats[color_key]['losses'] += 1
-            elif result == "0-1":
-                if user_color == chess.BLACK:
-                    opening_stats[opening]['wins'] += 1
-                    color_stats[color_key]['wins'] += 1
-                else:
-                    opening_stats[opening]['losses'] += 1
-                    color_stats[color_key]['losses'] += 1
-            elif result == "1/2-1/2":
-                opening_stats[opening]['draws'] += 1
-                color_stats[color_key]['draws'] += 1
+            color_stats[color_key]['wins'] += 1
+        elif user_result == 'loss':
+            opening_stats[opening]['losses'] += 1
+            color_key = 'white' if user_color == chess.WHITE else 'black'
+            color_stats[color_key]['losses'] += 1
+        elif user_result == 'draw':
+            opening_stats[opening]['draws'] += 1
+            color_key = 'white' if user_color == chess.WHITE else 'black'
+            color_stats[color_key]['draws'] += 1
     
     weaknesses = categorize_mistakes(all_mistakes)
     
@@ -441,6 +389,20 @@ def analyze_games(username, pgn_file):
     
     # Fetch puzzles
     puzzles = fetch_lichess_puzzles(5)
+    
+    if not puzzles:
+        # If no puzzles fetched, show Lichess link
+        return (
+            full_report,
+            ai_report,
+            "## 🧩 Masalalar\n\nMasalalarni [Lichess.org](https://lichess.org/training) saytidan ishlang",
+            "",
+            None,
+            "",
+            None,
+            "",
+            None
+        )
     
     puzzle_svgs = []
     puzzle_info = []
