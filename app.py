@@ -10,7 +10,10 @@ import os
 import time
 import re
 import chess.polyglot
+import logging
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 genai.configure(api_key=GEMINI_API_KEY)
@@ -18,7 +21,7 @@ model = genai.GenerativeModel('gemini-2.0-flash-exp')
 
 def get_user_games_from_chess_com(username):
     try:
-        # Keep original case but normalize for API
+        logger.info(f"Starting to fetch games for user: {username}")
         username_original = username.strip()
         username = username_original.lower()
         
@@ -26,18 +29,23 @@ def get_user_games_from_chess_com(username):
         response = requests.get(user_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         
         if response.status_code != 200:
-            return None, None, f"❌ Foydalanuvchi topilmadi: {username}. Chess.com'da mavjudligini tekshiring."
+            logger.error(f"User not found: {username}")
+            return None, f"❌ Foydalanuvchi topilmadi: {username}. Chess.com'da mavjudligini tekshiring."
         
-        
+        logger.info(f"User found: {username}")
         archives_url = f"https://api.chess.com/pub/player/{username}/games/archives"
         response = requests.get(archives_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
         
         if response.status_code != 200:
+            logger.error("Archives not found")
             return None, "❌ O'yinlar arxivi topilmadi."
         
         archives = response.json()['archives']
         if not archives:
+            logger.error("No archives available")
             return None, "❌ O'yinlar topilmadi."
+        
+        logger.info(f"Found {len(archives)} archives")
         
         all_games = []
         for archive_url in reversed(archives[-3:]):
@@ -46,8 +54,11 @@ def get_user_games_from_chess_com(username):
             if response.status_code == 200:
                 games = response.json()['games']
                 all_games.extend(games)
+                logger.info(f"Fetched {len(games)} games from archive")
             if len(all_games) >= 50:
                 break
+        
+        logger.info(f"Total games fetched: {len(all_games)}")
         
         rapid_games = [g for g in all_games if g.get('time_class') in ['rapid', 'blitz']]
         if not rapid_games:
@@ -55,38 +66,48 @@ def get_user_games_from_chess_com(username):
         
         pgn_list = [g['pgn'] for g in rapid_games[:50] if 'pgn' in g]
         
+        logger.info(f"Total PGN games prepared: {len(pgn_list)}")
+        
         if not pgn_list:
+            logger.error("No PGN games found")
             return None, "❌ PGN formatdagi o'yinlar topilmadi."
         
         return pgn_list, None
         
     except Exception as e:
+        logger.error(f"Error fetching games: {str(e)}")
         return None, f"❌ Xatolik: {str(e)}"
 
 def parse_pgn_content(pgn_content):
+    logger.info("Starting to parse PGN content")
     games = []
     if isinstance(pgn_content, list):
-        for pgn_text in pgn_content:
+        for idx, pgn_text in enumerate(pgn_content):
             try:
                 game = chess.pgn.read_game(io.StringIO(pgn_text))
                 if game:
                     games.append(game)
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to parse game {idx}: {str(e)}")
                 pass
     else:
         pgn_io = io.StringIO(pgn_content)
+        idx = 0
         while True:
             try:
                 game = chess.pgn.read_game(pgn_io)
                 if game is None:
                     break
                 games.append(game)
-            except:
+                idx += 1
+            except Exception as e:
+                logger.warning(f"Failed to parse game {idx}: {str(e)}")
                 break
+    
+    logger.info(f"Successfully parsed {len(games)} games")
     return games
 
 def get_opening_name_from_eco(eco_code):
-    """Convert ECO code to opening name using chess library"""
     eco_openings = {
         'A00': 'Uncommon Opening',
         'A01': "Nimzowitsch-Larsen Attack",
@@ -128,6 +149,9 @@ def get_opening_name_from_eco(eco_code):
         'C50': 'Italian Game',
         'C60': 'Spanish Opening (Ruy Lopez)',
         'C65': 'Spanish Opening: Berlin Defense',
+        'C70': 'Spanish Opening',
+        'C78': 'Spanish Opening: Morphy Defense',
+        'C80': 'Spanish Opening: Open Variation',
         'D00': 'Queen Pawn Game',
         'D02': 'Queen Pawn Game: 2.Nf3',
         'D10': 'Slav Defense',
@@ -143,10 +167,9 @@ def get_opening_name_from_eco(eco_code):
         'E90': "King's Indian Defense: Orthodox Variation",
     }
     
-    return eco_openings.get(eco_code, f"ECO {eco_code}")
+    return eco_openings.get(eco_code, f"Opening ECO {eco_code}")
 
 def detect_opening(game):
-    """Detect opening from ECO code or Opening header"""
     opening = game.headers.get("Opening", "")
     eco = game.headers.get("ECO", "")
     
@@ -160,16 +183,9 @@ def detect_opening(game):
 def analyze_game_detailed(game, username):
     board = game.board()
     mistakes = []
-    blunders = []
-    mistake_moves = []
-    hanging_pieces = []
-    opening_mistakes = []
-    middlegame_mistakes = []
-    endgame_mistakes = []
     
     move_number = 0
     
-    # Normalize all player names to lowercase
     white_player = game.headers.get("White", "").strip().lower()
     black_player = game.headers.get("Black", "").strip().lower()
     username_lower = username.strip().lower()
@@ -183,7 +199,6 @@ def analyze_game_detailed(game, username):
     result = game.headers.get("Result", "*")
     opening = detect_opening(game)
     
-    # Determine user result
     user_won = None
     user_result = None
     if user_color is not None and result != "*":
@@ -232,23 +247,21 @@ def analyze_game_detailed(game, username):
                 mistake_type = 'hanging_piece'
         
         if move_number <= 10:
-            phase = 'opening_mistake'
+            phase = 'opening'
         elif len(board.piece_map()) <= 10:
-            phase = 'endgame_mistake'
+            phase = 'endgame'
         else:
-            phase = 'middlegame_mistake'
+            phase = 'middlegame'
         
         if mistake_type:
-            mistakes.append({'type': mistake_type, 'phase': phase, 'move_number': move_number})
+            mistakes.append({
+                'type': mistake_type,
+                'phase': phase,
+                'move_number': move_number
+            })
     
     return {
         'mistakes': mistakes,
-        'blunders': blunders,
-        'mistake_moves': mistake_moves,
-        'hanging_pieces': hanging_pieces,
-        'opening_mistakes': opening_mistakes,
-        'middlegame_mistakes': middlegame_mistakes,
-        'endgame_mistakes': endgame_mistakes,
         'opening': opening,
         'result': result,
         'user_color': user_color,
@@ -256,21 +269,46 @@ def analyze_game_detailed(game, username):
     }
 
 def categorize_mistakes(all_analyses):
-    """Categorize all types of mistakes with proper counting"""
+    logger.info("Categorizing mistakes from all games")
+    
     if not all_analyses:
+        logger.warning("No analyses provided for categorization")
         return []
     
-    # Count all mistake types
-    blunders = sum(len(a['blunders']) for a in all_analyses)
-    mistakes = sum(len(a['mistake_moves']) for a in all_analyses)
-    hanging = sum(len(a['hanging_pieces']) for a in all_analyses)
-    opening = sum(len(a['opening_mistakes']) for a in all_analyses)
-    middlegame = sum(len(a['middlegame_mistakes']) for a in all_analyses)
-    endgame = sum(len(a['endgame_mistakes']) for a in all_analyses)
+    blunders = 0
+    regular_mistakes = 0
+    hanging = 0
+    opening = 0
+    middlegame = 0
+    endgame = 0
     
-    total = blunders + mistakes + hanging + opening + middlegame + endgame
+    for analysis in all_analyses:
+        for mistake in analysis.get('mistakes', []):
+            mistake_type = mistake.get('type')
+            phase = mistake.get('phase')
+            
+            if mistake_type == 'blunder':
+                blunders += 1
+            elif mistake_type == 'mistake':
+                regular_mistakes += 1
+            elif mistake_type == 'hanging_piece':
+                hanging += 1
+            
+            if phase == 'opening':
+                opening += 1
+            elif phase == 'middlegame':
+                middlegame += 1
+            elif phase == 'endgame':
+                endgame += 1
+    
+    total = blunders + regular_mistakes + hanging + opening + middlegame + endgame
+    
+    logger.info(f"Total mistakes found: {total}")
+    logger.info(f"Blunders: {blunders}, Mistakes: {regular_mistakes}, Hanging: {hanging}")
+    logger.info(f"Opening: {opening}, Middlegame: {middlegame}, Endgame: {endgame}")
     
     if total == 0:
+        logger.warning("No mistakes found in any game")
         return []
     
     weaknesses = []
@@ -282,11 +320,11 @@ def categorize_mistakes(all_analyses):
             'percentage': (blunders / total * 100)
         })
     
-    if mistakes > 0:
+    if regular_mistakes > 0:
         weaknesses.append({
             'category': 'Kichik xatolar',
-            'count': mistakes,
-            'percentage': (mistakes / total * 100)
+            'count': regular_mistakes,
+            'percentage': (regular_mistakes / total * 100)
         })
     
     if hanging > 0:
@@ -317,96 +355,81 @@ def categorize_mistakes(all_analyses):
             'percentage': (endgame / total * 100)
         })
     
-    # Sort by count descending
     weaknesses.sort(key=lambda x: x['count'], reverse=True)
     
+    logger.info(f"Total weakness categories: {len(weaknesses)}")
     return weaknesses
+
 def fetch_lichess_puzzles(themes, count=5):
-    """Fetch puzzles from Lichess based on detected weakness themes"""
+    logger.info(f"Fetching {count} puzzles for themes: {themes}")
     puzzles = []
     
-    # Map weakness categories to Lichess puzzle themes
     theme_map = {
-        "Qo'pol xatolar": ['blunder', 'hangingPiece', 'sacrifice'],
-        'Kichik xatolar': ['advantage', 'endgame', 'middlegame'],
-        'Himoyasiz qoldirish': ['hangingPiece', 'attraction', 'exposedKing'],
-        'Debyut xatolari': ['opening', 'short'],
+        "Qo'pol xatolar": ['hangingPiece', 'discoveredAttack', 'doubleCheck'],
+        'Kichik xatolar': ['advantage', 'crushing', 'master'],
+        'Himoyasiz qoldirish': ['hangingPiece', 'pin', 'skewer'],
+        'Debyut xatolari': ['opening', 'short', 'middlegame'],
         "O'rta o'yin xatolari": ['middlegame', 'attackingF2F7', 'advancedPawn'],
         'Endshpil xatolari': ['endgame', 'queenEndgame', 'rookEndgame']
     }
     
-    # Collect all relevant themes
     lichess_themes = []
     for theme_name in themes:
         if theme_name in theme_map:
             lichess_themes.extend(theme_map[theme_name])
     
-    # Remove duplicates
     lichess_themes = list(set(lichess_themes))[:3]
+    logger.info(f"Selected Lichess themes: {lichess_themes}")
     
     try:
-        # Use batch API to get multiple puzzles
-        angle = ','.join(lichess_themes) if lichess_themes else 'mix'
-        url = f"https://lichess.org/api/puzzle/batch/{angle}"
-        
-        response = requests.get(url, timeout=15, headers={
-            'User-Agent': 'Mozilla/5.0',
-            'Accept': 'application/x-ndjson'
-        })
-        
-        if response.status_code == 200:
-            # Parse NDJSON response
-            lines = response.text.strip().split('\n')
-            for line in lines[:count]:
-                try:
-                    puzzle_data = eval(line)  # or use json.loads(line)
-                    puzzle_game = puzzle_data['game']
-                    puzzle_info = puzzle_data['puzzle']
-                    
-                    puzzles.append({
-                        'id': puzzle_info['id'],
-                        'fen': puzzle_game.get('fen', ''),
-                        'moves': puzzle_game.get('pgn', '').split()[-1],
-                        'solution': puzzle_info.get('solution', []),
-                        'rating': puzzle_info.get('rating', 1500),
-                        'themes': puzzle_info.get('themes', []),
-                        'url': f"https://lichess.org/training/{puzzle_info['id']}"
-                    })
-                except:
-                    continue
-    except Exception as e:
-        print(f"Error fetching puzzles: {e}")
-    
-    # Fallback if not enough puzzles
-    if len(puzzles) < count:
-        try:
-            # Try daily puzzle as backup
-            url = "https://lichess.org/api/puzzle/daily"
-            response = requests.get(url, timeout=10)
+        for theme in lichess_themes:
+            if len(puzzles) >= count:
+                break
+            
+            url = f"https://lichess.org/api/puzzle/daily"
+            response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+            
             if response.status_code == 200:
                 daily = response.json()
-                puzzles.append({
-                    'id': daily['puzzle']['id'],
-                    'fen': daily['game'].get('fen', ''),
-                    'moves': daily['game'].get('pgn', '').split()[-1],
-                    'solution': daily['puzzle'].get('solution', []),
-                    'rating': daily['puzzle'].get('rating', 1500),
-                    'themes': daily['puzzle'].get('themes', []),
-                    'url': f"https://lichess.org/training/{daily['puzzle']['id']}"
-                })
-        except:
-            pass
+                puzzle_id = daily['puzzle']['id']
+                
+                if not any(p['id'] == puzzle_id for p in puzzles):
+                    puzzles.append({
+                        'id': puzzle_id,
+                        'fen': daily['game'].get('fen', ''),
+                        'moves': daily['game'].get('pgn', '').split()[-1] if daily['game'].get('pgn') else '',
+                        'solution': daily['puzzle'].get('solution', []),
+                        'rating': daily['puzzle'].get('rating', 1500),
+                        'themes': daily['puzzle'].get('themes', []),
+                        'url': f"https://lichess.org/training/{puzzle_id}"
+                    })
+                    logger.info(f"Added puzzle {puzzle_id} with rating {daily['puzzle'].get('rating')}")
+            
+            time.sleep(0.5)
+    except Exception as e:
+        logger.error(f"Error fetching puzzles: {str(e)}")
     
+    while len(puzzles) < count:
+        try:
+            url = "https://lichess.org/training"
+            puzzles.append({
+                'id': f'puzzle_{len(puzzles)+1}',
+                'fen': '',
+                'moves': '',
+                'solution': [],
+                'rating': 1500,
+                'themes': ['Mixed'],
+                'url': url
+            })
+            logger.info(f"Added fallback puzzle link {len(puzzles)}")
+        except:
+            break
+    
+    logger.info(f"Total puzzles prepared: {len(puzzles)}")
     return puzzles[:count]
 
-def create_board_svg(fen, size=400):
-    """Create SVG representation of chess position"""
-    board = chess.Board(fen)
-    svg = chess.svg.board(board, size=size)
-    return svg
-
 def get_comprehensive_analysis(weaknesses, opening_stats, color_stats, total_games):
-    """Get AI-powered comprehensive analysis and learning plan"""
+    logger.info("Generating AI comprehensive analysis")
     
     weakness_text = "\n".join([f"- {w['category']}: {w['count']} marta ({w['percentage']:.1f}%)" for w in weaknesses])
     
@@ -453,30 +476,37 @@ MUHIM: Javobni FAQAT O'ZBEK TILIDA yozing! Aniq va amaliy maslahatlar bering."""
     
     try:
         response = model.generate_content(prompt)
+        logger.info("AI analysis generated successfully")
         return response.text
     except Exception as e:
+        logger.error(f"AI analysis failed: {str(e)}")
         return f"AI tahlil hozircha mavjud emas: {str(e)}"
 
 def analyze_games(username, pgn_file):
-    actual_username = username  # Store for later use
+    logger.info("=== Starting game analysis ===")
+    actual_username = username
 
     if username:
-        # FIX: Only unpack two values (pgn_list, error)
         pgn_content, error = get_user_games_from_chess_com(username)
         if error:
+            logger.error(f"Failed to fetch games: {error}")
             return error, "", "", "", None, None, None, None, None
         actual_username = username
     elif pgn_file:
+        logger.info("Processing uploaded PGN file")
         actual_username = "Player"
         pgn_content = pgn_file.decode('utf-8') if isinstance(pgn_file, bytes) else pgn_file
     else:
+        logger.error("No username or file provided")
         return "❌ Foydalanuvchi nomini kiriting yoki PGN faylni yuklang", "", "", "", None, None, None, None, None
 
     games = parse_pgn_content(pgn_content)
-
     
     if not games:
+        logger.error("No games parsed")
         return "❌ O'yinlar topilmadi yoki tahlil qilinmadi", "", "", "", None, None, None, None, None
+    
+    logger.info(f"Analyzing {len(games)} games")
     
     all_analyses = []
     opening_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0, 'total': 0})
@@ -485,13 +515,16 @@ def analyze_games(username, pgn_file):
         'black': {'wins': 0, 'losses': 0, 'draws': 0}
     }
     
-    for game in games[:30]:
+    for idx, game in enumerate(games):
+        logger.info(f"Analyzing game {idx + 1}/{len(games)}")
         analysis = analyze_game_detailed(game, actual_username)
         all_analyses.append(analysis)
         
         opening = analysis['opening']
         user_result = analysis.get('user_result')
         user_color = analysis['user_color']
+        
+        logger.info(f"Game {idx + 1}: {opening}, Result: {user_result}, Color: {user_color}")
         
         if user_color is not None:
             opening_stats[opening]['total'] += 1
@@ -509,24 +542,27 @@ def analyze_games(username, pgn_file):
                 color_key = 'white' if user_color == chess.WHITE else 'black'
                 color_stats[color_key]['draws'] += 1
     
+    logger.info("Categorizing mistakes")
     weaknesses = categorize_mistakes(all_analyses)
     
-    # Collect all mistakes from all analyses
     all_mistakes = []
     for analysis in all_analyses:
         all_mistakes.extend(analysis.get('mistakes', []))
     
-    # Statistics Report
+    logger.info(f"Total mistakes collected: {len(all_mistakes)}")
+    
     stats_report = f"## 📊 {len(games)} ta o'yin tahlili\n\n"
     stats_report += f"**Jami xatolar:** {len(all_mistakes)} ta\n\n"
     
     stats_report += "### 🎯 Eng zaif 3 tomoningiz:\n\n"
-    for i, w in enumerate(weaknesses, 1):
-        stats_report += f"**{i}. {w['category']}** - {w['count']} marta ({w['percentage']:.1f}%)\n"
+    if weaknesses:
+        for i, w in enumerate(weaknesses[:3], 1):
+            stats_report += f"**{i}. {w['category']}** - {w['count']} marta ({w['percentage']:.1f}%)\n"
+    else:
+        stats_report += "Xatolar topilmadi yoki tahlil qilinmadi.\n"
     
-    # Opening Statistics
     opening_report = "\n\n## 🎭 Debyut Statistikasi\n\n"
-    sorted_openings = sorted(opening_stats.items(), key=lambda x: x[1]['total'], reverse=True)[:5]
+    sorted_openings = sorted(opening_stats.items(), key=lambda x: x[1]['total'], reverse=True)[:10]
     
     for opening, stats in sorted_openings:
         total = stats['total']
@@ -538,7 +574,6 @@ def analyze_games(username, pgn_file):
         opening_report += f"**{opening}** ({total} o'yin)\n"
         opening_report += f"- G'alabalar: {wins} ({win_rate:.1f}%) | Yutqazishlar: {losses} | Duranglar: {draws}\n\n"
     
-    # Color Statistics
     color_report = "\n\n## ⚪⚫ Rang bo'yicha natijalar\n\n"
     
     white_total = sum(color_stats['white'].values())
@@ -560,27 +595,28 @@ def analyze_games(username, pgn_file):
     
     full_report = stats_report + opening_report + color_report
     
-    # Get AI Analysis
+    logger.info("Generating AI analysis")
     ai_analysis = get_comprehensive_analysis(weaknesses, opening_stats, color_stats, len(games))
     ai_report = f"## 🤖 AI Murabbiy: To'liq Tahlil va O'quv Rejasi\n\n{ai_analysis}"
     
-        # Get puzzles based on top 3 weaknesses
     weakness_themes = [w['category'] for w in weaknesses[:3]]
+    logger.info(f"Fetching puzzles for themes: {weakness_themes}")
     puzzles = fetch_lichess_puzzles(weakness_themes, count=5)
     
-    # Fix: Format puzzle output as requested
     puzzle_text = "## 🧩 Sizning shaxsiy masalalaringiz\n\n"
     if puzzles:
         for i, puzzle in enumerate(puzzles, 1):
-            theme = puzzle.get('themes', ['Tactics'])[0].title() if 'themes' in puzzle else 'Tactics'
+            theme = puzzle.get('themes', ['Tactics'])[0].title() if puzzle.get('themes') else 'Tactics'
             rating = puzzle.get('rating', 1500)
-            url = f"https://lichess.org/training/{puzzle.get('id', '')}"
-            fen = puzzle.get('fen', '')[:40]
+            url = puzzle.get('url', 'https://lichess.org/training')
+            fen = puzzle.get('fen', '')[:40] if puzzle.get('fen') else 'N/A'
             puzzle_text += f"**Puzzle {i}: {theme}** (Rating: {rating})\n"
             puzzle_text += f"- [Solve on Lichess]({url})\n"
             puzzle_text += f"- Position: `{fen}...`\n\n"
     else:
         puzzle_text += "- Masalalarni [Lichess.org](https://lichess.org/training) saytidan ishlang\n"
+    
+    logger.info("=== Analysis completed successfully ===")
     
     return (
         full_report,
@@ -593,6 +629,7 @@ def analyze_games(username, pgn_file):
         "",
         None
     )
+
 with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
     # ♟️ Professional Шахмат O'quv Rejasi
