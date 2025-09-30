@@ -289,13 +289,15 @@ def categorize_mistakes(all_analyses):
     logger.info(f"Total weakness categories: {len(weaknesses)}")
     return weaknesses
 
+import json
+
 def fetch_lichess_puzzles(themes, count=5):
     logger.info(f"Fetching {count} puzzles for themes: {themes}")
     puzzles = []
     
     theme_map = {
-        "Qo'pol xatolar": ['hangingPiece', 'discoveredAttack', 'doubleCheck'],
-        'Kichik xatolar': ['advantage', 'crushing', 'master'],
+        "Qo'pol xatolar": ['hangingPiece', 'discoveredAttack', 'fork'],
+        'Kichik xatolar': ['advantage', 'crushing', 'attackingF2F7'],
         'Himoyasiz qoldirish': ['hangingPiece', 'pin', 'skewer'],
         'Debyut xatolari': ['opening', 'short', 'middlegame'],
         "O'rta o'yin xatolari": ['middlegame', 'attackingF2F7', 'advancedPawn'],
@@ -311,43 +313,50 @@ def fetch_lichess_puzzles(themes, count=5):
     logger.info(f"Selected Lichess themes: {lichess_themes}")
     
     try:
-        # Fetch puzzles from Lichess database API
+        # Fetch puzzles using the daily puzzle API and database
         for theme in lichess_themes:
             if len(puzzles) >= count:
                 break
             
-            # Use the correct API endpoint with theme filter
-            url = f"https://lichess.org/api/puzzle/batch/mix?nb=1&themes={theme}"
+            # Use Lichess puzzle database API
+            url = f"https://lichess.org/api/puzzle/batch/mix?nb=2&themes={theme}"
             response = requests.get(url, timeout=10, headers={
                 'User-Agent': 'Mozilla/5.0',
                 'Accept': 'application/x-ndjson'
             })
             
             if response.status_code == 200:
-                # Parse NDJSON response
+                # Parse NDJSON (newline-delimited JSON)
                 lines = response.text.strip().split('\n')
                 for line in lines:
                     if len(puzzles) >= count:
                         break
+                    if not line.strip():
+                        continue
                     try:
-                        puzzle_data = eval(line)  # or use json.loads(line)
-                        puzzle_id = puzzle_data['puzzle']['id']
+                        puzzle_data = json.loads(line)  # Use json.loads instead of eval
+                        game_data = puzzle_data.get('game', {})
+                        puzzle_info = puzzle_data.get('puzzle', {})
                         
-                        if not any(p['id'] == puzzle_id for p in puzzles):
+                        puzzle_id = puzzle_info.get('id', '')
+                        
+                        if puzzle_id and not any(p['id'] == puzzle_id for p in puzzles):
                             puzzles.append({
                                 'id': puzzle_id,
-                                'fen': puzzle_data['puzzle'].get('fen', ''),
-                                'moves': puzzle_data['puzzle'].get('plays', ''),
-                                'solution': puzzle_data['puzzle'].get('solution', []),
-                                'rating': puzzle_data['puzzle'].get('rating', 1500),
-                                'themes': puzzle_data['puzzle'].get('themes', []),
+                                'fen': game_data.get('fen', ''),
+                                'moves': ' '.join(puzzle_info.get('solution', [])),
+                                'solution': puzzle_info.get('solution', []),
+                                'rating': puzzle_info.get('rating', 1500),
+                                'themes': puzzle_info.get('themes', []),
                                 'url': f"https://lichess.org/training/{puzzle_id}"
                             })
-                            logger.info(f"Added puzzle {puzzle_id} with rating {puzzle_data['puzzle'].get('rating')}")
-                    except Exception as e:
+                            logger.info(f"Added puzzle {puzzle_id} with rating {puzzle_info.get('rating')}")
+                    except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse puzzle line: {str(e)}")
+                    except Exception as e:
+                        logger.warning(f"Error processing puzzle: {str(e)}")
             
-            time.sleep(0.5)
+            time.sleep(0.3)
     except Exception as e:
         logger.error(f"Error fetching puzzles: {str(e)}")
     
@@ -358,27 +367,29 @@ def fetch_lichess_puzzles(themes, count=5):
             response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
             
             if response.status_code == 200:
-                daily = response.json()
-                puzzle_id = daily['puzzle']['id']
+                daily_data = response.json()
+                game_data = daily_data.get('game', {})
+                puzzle_info = daily_data.get('puzzle', {})
+                puzzle_id = puzzle_info.get('id', '')
                 
-                if not any(p['id'] == puzzle_id for p in puzzles):
+                if puzzle_id and not any(p['id'] == puzzle_id for p in puzzles):
                     puzzles.append({
                         'id': puzzle_id,
-                        'fen': daily['game'].get('fen', ''),
-                        'moves': daily['game'].get('pgn', '').split()[-1] if daily['game'].get('pgn') else '',
-                        'solution': daily['puzzle'].get('solution', []),
-                        'rating': daily['puzzle'].get('rating', 1500),
-                        'themes': daily['puzzle'].get('themes', []),
+                        'fen': game_data.get('fen', ''),
+                        'moves': ' '.join(puzzle_info.get('solution', [])),
+                        'solution': puzzle_info.get('solution', []),
+                        'rating': puzzle_info.get('rating', 1500),
+                        'themes': puzzle_info.get('themes', []),
                         'url': f"https://lichess.org/training/{puzzle_id}"
                     })
                     logger.info(f"Added daily puzzle {puzzle_id}")
         except Exception as e:
             logger.error(f"Error fetching daily puzzle: {str(e)}")
     
-    # Fill with fallback links if still not enough
+    # Fill with fallback training links if still not enough
     while len(puzzles) < count:
         puzzles.append({
-            'id': f'puzzle_{len(puzzles)+1}',
+            'id': f'training_{len(puzzles)+1}',
             'fen': '',
             'moves': '',
             'solution': [],
@@ -427,7 +438,7 @@ Quyidagilarni taqdim eting:
 
 3. **TAVSIYA ETILGAN RESURSLAR**:
    - Kitoblar (muallif va nom bilan)
-   - Onlayn kurslar (ChessBase, Chess.com, Lichess)
+   - Onlayn kurslar (Uzchess, Chess.com, Lichess)
    - YouTube kanallari
    - Mashq uchun maxsus botlar yoki dasturlar
 
@@ -450,7 +461,6 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
     actual_username = None
     pgn_content = None
 
-    # Chess.com user
     if username_chesscom:
         pgn_content, error = get_user_games_from_chess_com(username_chesscom)
         if error:
@@ -628,9 +638,9 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     
     with gr.Row():
         with gr.Column():
-            gr.Markdown("### 🌐 Chess.com dan tahlil")
+            gr.Markdown("### 🌐 Uzchess.com dan tahlil")
             username_chesscom = gr.Textbox(
-                label="Chess.com foydalanuvchi nomi",
+                label="Uzchess.com foydalanuvchi nomi",
                 placeholder="Foydalanuvchi nomini kiriting",
             )
         
@@ -691,7 +701,7 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
     ---
     ### 📝 Qanday foydalanish:
-    - **Chess.com:** Foydalanuvchi nomingizni kiriting (oxirgi 30-50 ta o'yin tahlil qilinadi)
+    - **Uzchess.com:** Foydalanuvchi nomingizni kiriting (oxirgi 30-50 ta o'yin tahlil qilinadi)
     - **Lichess:** Profile → Games → Export orqali PGN faylni yuklang
     - **Masalalar:** Har bir masalani tahlil qiling va eng yaxshi yurishni toping
     
