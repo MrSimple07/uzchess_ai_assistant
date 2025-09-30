@@ -3,7 +3,6 @@ import chess
 import chess.pgn
 import io
 import requests
-import google.generativeai as genai
 from collections import defaultdict
 import os
 import logging

@@ -3,7 +3,7 @@
 import os
 from collections import defaultdict
 import logging
-import genai
+import google.generativeai as genai
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 genai.configure(api_key=GEMINI_API_KEY)
