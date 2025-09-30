@@ -324,6 +324,7 @@ def analyze_games(username, pgn_file):
         
         opening_stats[opening]['total'] += 1
         
+        # Fix: Only increment win/loss/draw if user_result is not None
         if user_result == 'win':
             opening_stats[opening]['wins'] += 1
             color_key = 'white' if user_color == chess.WHITE else 'black'
@@ -390,19 +391,31 @@ def analyze_games(username, pgn_file):
     # Fetch puzzles
     puzzles = fetch_lichess_puzzles(5)
     
-    if not puzzles:
-        # If no puzzles fetched, show Lichess link
-        return (
-            full_report,
-            ai_report,
-            "## 🧩 Masalalar\n\nMasalalarni [Lichess.org](https://lichess.org/training) saytidan ishlang",
-            "",
-            None,
-            "",
-            None,
-            "",
-            None
-        )
+    # Fix: Format puzzle output as requested
+    puzzle_text = "## 🧩 Sizning shaxsiy masalalaringiz\n\n"
+    if puzzles:
+        for i, puzzle in enumerate(puzzles, 1):
+            theme = puzzle.get('themes', ['Tactics'])[0].title() if 'themes' in puzzle else 'Tactics'
+            rating = puzzle.get('rating', 1500)
+            url = f"https://lichess.org/training/{puzzle.get('id', '')}"
+            fen = puzzle.get('fen', '')[:40]
+            puzzle_text += f"**Puzzle {i}: {theme}** (Rating: {rating})\n"
+            puzzle_text += f"- [Solve on Lichess]({url})\n"
+            puzzle_text += f"- Position: `{fen}...`\n\n"
+    else:
+        puzzle_text += "- Masalalarni [Lichess.org](https://lichess.org/training) saytidan ishlang\n"
+    
+    return (
+        full_report,
+        ai_report,
+        puzzle_text,
+        "",
+        None,
+        "",
+        None,
+        "",
+        None
+    )
     
     puzzle_svgs = []
     puzzle_info = []
