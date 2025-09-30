@@ -11,6 +11,7 @@ import time
 import re
 import chess.polyglot
 import logging
+from openings import get_opening_name_from_eco, detect_opening
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -107,78 +108,6 @@ def parse_pgn_content(pgn_content):
     logger.info(f"Successfully parsed {len(games)} games")
     return games
 
-def get_opening_name_from_eco(eco_code):
-    eco_openings = {
-        'A00': 'Uncommon Opening',
-        'A01': "Nimzowitsch-Larsen Attack",
-        'A02': "Bird's Opening",
-        'A03': "Bird's Opening: Dutch Variation",
-        'A04': 'Reti Opening',
-        'A05': 'Reti Opening: 1...Nf6',
-        'A06': 'Reti Opening: 2.b3',
-        'A10': 'English Opening',
-        'A15': 'English Opening: Anglo-Indian Defense',
-        'A20': 'English Opening: 1...e5',
-        'A30': 'English Opening: Symmetrical Variation',
-        'A40': 'Queen Pawn Game',
-        'A45': 'Indian Defense',
-        'A46': 'Indian Defense: 2.Nf3',
-        'A50': 'Indian Defense: Normal Variation',
-        'B00': 'Uncommon King Pawn Opening',
-        'B01': 'Scandinavian Defense',
-        'B02': "Alekhine's Defense",
-        'B03': "Alekhine's Defense: Four Pawns Attack",
-        'B10': 'Caro-Kann Defense',
-        'B12': 'Caro-Kann Defense: Advance Variation',
-        'B20': 'Sicilian Defense',
-        'B22': 'Sicilian Defense: Alapin Variation',
-        'B23': 'Sicilian Defense: Closed',
-        'B30': 'Sicilian Defense: 2...Nc6',
-        'B40': 'Sicilian Defense: French Variation',
-        'B50': 'Sicilian Defense: 2...d6',
-        'B90': 'Sicilian Defense: Najdorf',
-        'C00': 'French Defense',
-        'C02': 'French Defense: Advance Variation',
-        'C10': 'French Defense: Rubinstein Variation',
-        'C20': 'King Pawn Game',
-        'C30': "King's Gambit",
-        'C40': "King's Knight Opening",
-        'C41': 'Philidor Defense',
-        'C42': 'Russian Game (Petrov Defense)',
-        'C44': 'Scotch Game',
-        'C50': 'Italian Game',
-        'C60': 'Spanish Opening (Ruy Lopez)',
-        'C65': 'Spanish Opening: Berlin Defense',
-        'C70': 'Spanish Opening',
-        'C78': 'Spanish Opening: Morphy Defense',
-        'C80': 'Spanish Opening: Open Variation',
-        'D00': 'Queen Pawn Game',
-        'D02': 'Queen Pawn Game: 2.Nf3',
-        'D10': 'Slav Defense',
-        'D20': "Queen's Gambit Accepted",
-        'D30': "Queen's Gambit Declined",
-        'D50': "Queen's Gambit Declined: 4.Bg5",
-        'E00': 'Indian Defense',
-        'E10': 'Indian Defense: 3.Nf3',
-        'E20': 'Nimzo-Indian Defense',
-        'E30': 'Nimzo-Indian Defense: Leningrad Variation',
-        'E60': "King's Indian Defense",
-        'E70': "King's Indian Defense: Normal Variation",
-        'E90': "King's Indian Defense: Orthodox Variation",
-    }
-    
-    return eco_openings.get(eco_code, f"Opening ECO {eco_code}")
-
-def detect_opening(game):
-    opening = game.headers.get("Opening", "")
-    eco = game.headers.get("ECO", "")
-    
-    if opening:
-        return opening
-    elif eco:
-        return get_opening_name_from_eco(eco)
-    else:
-        return "Unknown Opening"
 
 def analyze_game_detailed(game, username):
     board = game.board()
@@ -382,11 +311,50 @@ def fetch_lichess_puzzles(themes, count=5):
     logger.info(f"Selected Lichess themes: {lichess_themes}")
     
     try:
+        # Fetch puzzles from Lichess database API
         for theme in lichess_themes:
             if len(puzzles) >= count:
                 break
             
-            url = f"https://lichess.org/api/puzzle/daily"
+            # Use the correct API endpoint with theme filter
+            url = f"https://lichess.org/api/puzzle/batch/mix?nb=1&themes={theme}"
+            response = requests.get(url, timeout=10, headers={
+                'User-Agent': 'Mozilla/5.0',
+                'Accept': 'application/x-ndjson'
+            })
+            
+            if response.status_code == 200:
+                # Parse NDJSON response
+                lines = response.text.strip().split('\n')
+                for line in lines:
+                    if len(puzzles) >= count:
+                        break
+                    try:
+                        puzzle_data = eval(line)  # or use json.loads(line)
+                        puzzle_id = puzzle_data['puzzle']['id']
+                        
+                        if not any(p['id'] == puzzle_id for p in puzzles):
+                            puzzles.append({
+                                'id': puzzle_id,
+                                'fen': puzzle_data['puzzle'].get('fen', ''),
+                                'moves': puzzle_data['puzzle'].get('plays', ''),
+                                'solution': puzzle_data['puzzle'].get('solution', []),
+                                'rating': puzzle_data['puzzle'].get('rating', 1500),
+                                'themes': puzzle_data['puzzle'].get('themes', []),
+                                'url': f"https://lichess.org/training/{puzzle_id}"
+                            })
+                            logger.info(f"Added puzzle {puzzle_id} with rating {puzzle_data['puzzle'].get('rating')}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse puzzle line: {str(e)}")
+            
+            time.sleep(0.5)
+    except Exception as e:
+        logger.error(f"Error fetching puzzles: {str(e)}")
+    
+    # Fill remaining with daily puzzle if needed
+    if len(puzzles) < count:
+        try:
+            url = "https://lichess.org/api/puzzle/daily"
             response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
             
             if response.status_code == 200:
@@ -403,27 +371,22 @@ def fetch_lichess_puzzles(themes, count=5):
                         'themes': daily['puzzle'].get('themes', []),
                         'url': f"https://lichess.org/training/{puzzle_id}"
                     })
-                    logger.info(f"Added puzzle {puzzle_id} with rating {daily['puzzle'].get('rating')}")
-            
-            time.sleep(0.5)
-    except Exception as e:
-        logger.error(f"Error fetching puzzles: {str(e)}")
+                    logger.info(f"Added daily puzzle {puzzle_id}")
+        except Exception as e:
+            logger.error(f"Error fetching daily puzzle: {str(e)}")
     
+    # Fill with fallback links if still not enough
     while len(puzzles) < count:
-        try:
-            url = "https://lichess.org/training"
-            puzzles.append({
-                'id': f'puzzle_{len(puzzles)+1}',
-                'fen': '',
-                'moves': '',
-                'solution': [],
-                'rating': 1500,
-                'themes': ['Mixed'],
-                'url': url
-            })
-            logger.info(f"Added fallback puzzle link {len(puzzles)}")
-        except:
-            break
+        puzzles.append({
+            'id': f'puzzle_{len(puzzles)+1}',
+            'fen': '',
+            'moves': '',
+            'solution': [],
+            'rating': 1500,
+            'themes': ['Mixed'],
+            'url': "https://lichess.org/training"
+        })
+        logger.info(f"Added fallback puzzle link {len(puzzles)}")
     
     logger.info(f"Total puzzles prepared: {len(puzzles)}")
     return puzzles[:count]
@@ -482,23 +445,44 @@ MUHIM: Javobni FAQAT O'ZBEK TILIDA yozing! Aniq va amaliy maslahatlar bering."""
         logger.error(f"AI analysis failed: {str(e)}")
         return f"AI tahlil hozircha mavjud emas: {str(e)}"
 
-def analyze_games(username, pgn_file):
+def analyze_games(username_chesscom, pgn_file, username_pgn):
     logger.info("=== Starting game analysis ===")
-    actual_username = username
+    actual_username = None
+    pgn_content = None
 
-    if username:
-        pgn_content, error = get_user_games_from_chess_com(username)
+    # Chess.com user
+    if username_chesscom:
+        pgn_content, error = get_user_games_from_chess_com(username_chesscom)
         if error:
             logger.error(f"Failed to fetch games: {error}")
             return error, "", "", "", None, None, None, None, None
-        actual_username = username
+        actual_username = username_chesscom
+    
+    # PGN file upload
     elif pgn_file:
         logger.info("Processing uploaded PGN file")
-        actual_username = "Player"
         pgn_content = pgn_file.decode('utf-8') if isinstance(pgn_file, bytes) else pgn_file
+        
+        if username_pgn and username_pgn.strip():
+            actual_username = username_pgn.strip()
+        else:
+            # Try to extract username from first game headers
+            try:
+                first_game = chess.pgn.read_game(io.StringIO(pgn_content))
+                if first_game:
+                    white = first_game.headers.get("White", "")
+                    black = first_game.headers.get("Black", "")
+                    actual_username = white if white else black if black else "Player"
+                else:
+                    actual_username = "Player"
+            except:
+                actual_username = "Player"
+            
+            logger.info(f"Extracted username from PGN: {actual_username}")
+    
     else:
         logger.error("No username or file provided")
-        return "❌ Foydalanuvchi nomini kiriting yoki PGN faylni yuklang", "", "", "", None, None, None, None, None
+        return "❌ Chess.com foydalanuvchi nomini kiriting yoki PGN faylni yuklang", "", "", "", None, None, None, None, None
 
     games = parse_pgn_content(pgn_content)
     
@@ -644,16 +628,26 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     
     with gr.Row():
         with gr.Column():
-            username_input = gr.Textbox(
+            gr.Markdown("### 🌐 Chess.com dan tahlil")
+            username_chesscom = gr.Textbox(
                 label="Chess.com foydalanuvchi nomi",
                 placeholder="Foydalanuvchi nomini kiriting",
             )
+        
+        with gr.Column():
+            gr.Markdown("### 📁 PGN fayl yuklash")
             pgn_upload = gr.File(
-                label="📁 Yoki PGN faylni yuklang",
+                label="PGN faylni yuklang",
                 file_types=[".pgn"],
                 type="binary"
             )
-            analyze_btn = gr.Button("🔍 To'liq tahlil qilish", variant="primary", size="lg")
+            username_pgn = gr.Textbox(
+                label="Foydalanuvchi nomi (PGN uchun)",
+                placeholder="PGN dagi o'yinchi nomi (ixtiyoriy)",
+                info="Bo'sh qoldiring, avtomatik aniqlanadi"
+            )
+    
+    analyze_btn = gr.Button("🔍 To'liq tahlil qilish", variant="primary", size="lg")
     
     with gr.Row():
         stats_output = gr.Markdown(label="Statistika")
@@ -680,7 +674,7 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     
     analyze_btn.click(
         fn=analyze_games,
-        inputs=[username_input, pgn_upload],
+        inputs=[username_chesscom, pgn_upload, username_pgn],
         outputs=[
             stats_output,
             ai_output,
