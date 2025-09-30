@@ -1,0 +1,71 @@
+import logging
+import requests
+import time
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+def get_user_games_from_chess_com(username):
+    try:
+        logger.info(f"Fetching games for: {username}")
+        username = username.strip().lower()
+        
+        user_url = f"https://api.chess.com/pub/player/{username}"
+        response = requests.get(user_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        
+        if response.status_code != 200:
+            return None, f"❌ Foydalanuvchi topilmadi: {username}"
+        
+        archives_url = f"https://api.chess.com/pub/player/{username}/games/archives"
+        response = requests.get(archives_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        
+        if response.status_code != 200:
+            return None, "❌ O'yinlar arxivi topilmadi."
+        
+        archives = response.json()['archives']
+        if not archives:
+            return None, "❌ O'yinlar topilmadi."
+        
+        all_games = []
+        for archive_url in reversed(archives[-3:]):
+            time.sleep(0.3)
+            response = requests.get(archive_url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+            if response.status_code == 200:
+                games = response.json()['games']
+                all_games.extend(games)
+            if len(all_games) >= 50:
+                break
+        
+        rapid_games = [g for g in all_games if g.get('time_class') in ['rapid', 'blitz']]
+        if not rapid_games:
+            rapid_games = all_games[:50]
+        
+        pgn_list = [g['pgn'] for g in rapid_games[:50] if 'pgn' in g]
+        
+        if not pgn_list:
+            return None, "❌ PGN formatdagi o'yinlar topilmadi."
+        
+        return pgn_list, None
+        
+    except Exception as e:
+        logger.error(f"Error fetching games: {str(e)}")
+        return None, f"❌ Xatolik: {str(e)}"
+
+
+def fetch_lichess_puzzles(themes, count=5):
+    puzzles = []
+    
+    try:
+        url = "https://lichess.org/training"
+        for i in range(count):
+            puzzles.append({
+                'id': f'puzzle_{i+1}',
+                'url': url,
+                'theme': themes[0] if themes else 'Tactics',
+                'rating': 1500
+            })
+    except Exception as e:
+        logger.error(f"Error generating puzzle links: {str(e)}")
+    
+    return puzzles
