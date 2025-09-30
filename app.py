@@ -459,19 +459,21 @@ MUHIM: Javobni FAQAT O'ZBEK TILIDA yozing! Aniq va amaliy maslahatlar bering."""
 
 def analyze_games(username, pgn_file):
     actual_username = username  # Store for later use
-    
+
     if username:
-        pgn_content, returned_username, error = get_user_games_from_chess_com(username)
+        # FIX: Only unpack two values (pgn_list, error)
+        pgn_content, error = get_user_games_from_chess_com(username)
         if error:
             return error, "", "", "", None, None, None, None, None
-        actual_username = returned_username
+        actual_username = username
     elif pgn_file:
         actual_username = "Player"
         pgn_content = pgn_file.decode('utf-8') if isinstance(pgn_file, bytes) else pgn_file
     else:
         return "❌ Foydalanuvchi nomini kiriting yoki PGN faylni yuklang", "", "", "", None, None, None, None, None
-    
+
     games = parse_pgn_content(pgn_content)
+
     
     if not games:
         return "❌ O'yinlar topilmadi yoki tahlil qilinmadi", "", "", "", None, None, None, None, None
@@ -508,6 +510,11 @@ def analyze_games(username, pgn_file):
                 color_stats[color_key]['draws'] += 1
     
     weaknesses = categorize_mistakes(all_analyses)
+    
+    # Collect all mistakes from all analyses
+    all_mistakes = []
+    for analysis in all_analyses:
+        all_mistakes.extend(analysis.get('mistakes', []))
     
     # Statistics Report
     stats_report = f"## 📊 {len(games)} ta o'yin tahlili\n\n"
