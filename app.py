@@ -11,12 +11,6 @@ from core.core import analyze_games
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash-exp')
-
-
-
 with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
     # ♟️ Professional Шахмат O'quv Rejasi
