@@ -9,4 +9,6 @@ app_file: app.py
 pinned: false
 ---
 
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+Main info about the project is in the project_info.md file
+
+Proyekt haqidagi umumiy ma'lumot project_info.md faylida
