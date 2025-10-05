@@ -3,10 +3,13 @@ import chess
 import chess.pgn
 import io
 import re
+import logging
 from collections import defaultdict
 from core.ai_integration import get_comprehensive_analysis
 from core.openings import detect_opening, load_opening_database
 from core.chess_api import get_user_games_from_chess_com, fetch_lichess_puzzles
+
+logger = logging.getLogger(__name__)
 
 def extract_user_rating(games, username):
     ratings = []
@@ -70,6 +73,7 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
     
     # Extract user rating from games
     user_rating = extract_user_rating(games, actual_username)
+    logger.info(f"Extracted user rating: {user_rating}")
     
     all_analyses = []
     opening_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0, 'total': 0})
@@ -109,12 +113,12 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
         all_mistakes.extend(analysis.get('mistakes', []))
     
     stats_report = f"## 📊 {len(games)} ta o'yin tahlili\n\n"
-    stats_report += f"**Sizning reytingingiz:** {user_rating}\n"
+    stats_report += f"**Sizning o'rtacha reytingingiz:** {user_rating}\n\n"
     stats_report += f"**Jami xatolar:** {len(all_mistakes)} ta\n\n"
     
-    stats_report += "### 🎯 Eng zaif 3 tomoningiz:\n\n"
+    stats_report += "### 🎯 Eng zaif 5 tomoningiz:\n\n"
     if weaknesses:
-        for i, w in enumerate(weaknesses[:3], 1):
+        for i, w in enumerate(weaknesses[:5], 1):
             stats_report += f"**{i}. {w['category']}** - {w['count']} marta ({w['percentage']:.1f}%)\n"
     else:
         stats_report += "Xatolar topilmadi yoki tahlil qilinmadi.\n"
@@ -156,7 +160,7 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
     ai_analysis = get_comprehensive_analysis(weaknesses, opening_stats, color_stats, len(games))
     ai_report = f"## 🤖 AI Murabbiy: To'liq Tahlil va O'quv Rejasi\n\n{ai_analysis}"
     
-    weakness_themes = [w['category'] for w in weaknesses[:3]]
+    weakness_themes = [w['category'] for w in weaknesses[:5]]
     puzzles = fetch_lichess_puzzles(weakness_themes, user_rating=user_rating, count=5)
     
     puzzle_text = "## 🧩 Sizning shaxsiy masalalaringiz\n\n"
