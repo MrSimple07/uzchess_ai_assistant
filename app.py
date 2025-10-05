@@ -43,7 +43,7 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
                 placeholder="PGN dagi o'yinchi nomi (ixtiyoriy)",
             )
     
-    analyze_btn = gr.Button("🔍 To'liq tahlil qilish", variant="primary", size="lg")
+    analyze_btn = gr.Button("🔍 Tahlil qilish", variant="primary", size="lg")
     
     with gr.Row():
         stats_output = gr.Markdown(label="Statistika")
