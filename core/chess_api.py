@@ -54,41 +54,95 @@ def get_user_games_from_chess_com(username):
 
 
 def fetch_lichess_puzzles(error_types, user_rating=1500, count=5):
-    """
-    Fetches relevant Lichess puzzles based on error types and user rating.
-    error_types: list of strings (e.g. ['hangingPiece', 'blunder'])
-    user_rating: int, target puzzle rating
-    count: int, number of puzzles to fetch
-    """
     puzzles = []
+    
+    # Map Uzbek error categories to Lichess puzzle themes
+    theme_mapping = {
+        "Qo'pol xatolar": ["mate", "mateIn1", "mateIn2", "hangingPiece"],
+        "Kichik xatolar": ["advantage", "crushing", "attackingF2F7"],
+        "Himoyasiz qoldirish": ["hangingPiece", "pin", "skewer", "discoveredAttack"],
+        "Debyut xatolari": ["opening", "middlegame"],
+        "O'rta o'yin xatolari": ["middlegame", "fork", "defensiveMove"],
+        "Endshpil xatolari": ["endgame", "advancedPawn", "promotion"]
+    }
+    
+    # Convert error types to Lichess themes
+    lichess_themes = []
+    for error_type in error_types:
+        if error_type in theme_mapping:
+            lichess_themes.extend(theme_mapping[error_type])
+    
+    lichess_themes = list(set(lichess_themes))
+    
+    if not lichess_themes:
+        lichess_themes = ["tactics"]
+    
     try:
-        # Lichess API: https://lichess.org/api/puzzle
-        # We'll use the public puzzle endpoint and filter locally
-        url = f"https://lichess.org/api/puzzle"
-        headers = {'Accept': 'application/x-ndjson'}
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code != 200:
-            logger.error("Failed to fetch puzzles from Lichess")
-            return puzzles
-
-        lines = response.text.strip().split('\n')
-        for line in lines:
+        for theme in lichess_themes[:3]:  # Limit to top 3 themes
             if len(puzzles) >= count:
                 break
+                
+            url = f"https://lichess.org/api/puzzle/daily"
+            headers = {'Accept': 'application/json'}
+            
+            params = {
+                'max': count,
+                'theme': theme
+            }
+            
             try:
-                puzzle = requests.utils.json.loads(line)
-                # Filter by rating and theme (error type)
-                if abs(puzzle.get('rating', 1500) - user_rating) <= 150:
-                    if any(theme in puzzle.get('themes', []) for theme in error_types):
-                        puzzles.append({
-                            'id': puzzle['id'],
-                            'url': f"https://lichess.org/training/{puzzle['id']}",
-                            'theme': ', '.join(puzzle.get('themes', [])),
-                            'rating': puzzle.get('rating', 1500),
-                            'fen': puzzle.get('fen', '')
-                        })
-            except Exception as e:
-                continue
+                response = requests.get(
+                    "https://lichess.org/api/puzzle/activity",
+                    headers=headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # Filter by rating range
+                    for item in data.get('puzzles', []):
+                        if len(puzzles) >= count:
+                            break
+                            
+                        puzzle_rating = item.get('puzzle', {}).get('rating', 1500)
+                        
+                        if abs(puzzle_rating - user_rating) <= 300:
+                            puzzle_id = item.get('puzzle', {}).get('id')
+                            puzzle_themes = item.get('puzzle', {}).get('themes', [])
+                            
+                            puzzles.append({
+                                'id': puzzle_id,
+                                'url': f"https://lichess.org/training/{puzzle_id}",
+                                'theme': theme.title(),
+                                'rating': puzzle_rating,
+                                'themes': puzzle_themes
+                            })
+            except:
+                pass
+        
+        # If no puzzles found, provide generic training links
+        if not puzzles:
+            for i, theme in enumerate(lichess_themes[:count]):
+                puzzles.append({
+                    'id': f'theme_{i}',
+                    'url': f"https://lichess.org/training/{theme}",
+                    'theme': theme.title(),
+                    'rating': user_rating,
+                    'themes': [theme]
+                })
+                
     except Exception as e:
         logger.error(f"Error fetching puzzles: {str(e)}")
+        
+        for i, error_type in enumerate(error_types[:count]):
+            theme = theme_mapping.get(error_type, ["tactics"])[0]
+            puzzles.append({
+                'id': f'fallback_{i}',
+                'url': f"https://lichess.org/training/{theme}",
+                'theme': error_type,
+                'rating': user_rating,
+                'themes': [theme]
+            })
+    
     return puzzles
