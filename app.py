@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     gr.Markdown("""
-    # ♟️ Professional Шахмат O'quv Rejasi
+    # ♟️ Professional Shaxmat O'quv Rejasi
     
     ### To'liq tahlil va shaxsiy o'quv rejasi:
     - 📊 Batafsil statistika (debyutlar, ranglar, natijalar)
-    - 🎯 Zaif tomonlar tahlili
+    - 🎯 Zaif tomonlaringiz tahlili
     - 🤖 AI murabbiy tavsiyalari
     - 📚 Kitoblar va kurslar tavsiyasi
     - 🧩 Lichess mashq masalalari
@@ -25,7 +25,7 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
     
     with gr.Row():
         with gr.Column():
-            gr.Markdown("### 🌐 Chess.com dan tahlil")
+            gr.Markdown("### 🌐 Chess.com dan tahlil (Hozircha Chess Com, keyinchalik Uzchess API ulanadi)")
             username_chesscom = gr.Textbox(
                 label="Chess.com foydalanuvchi nomi",
                 placeholder="Foydalanuvchi nomini kiriting",
@@ -41,7 +41,6 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
             username_pgn = gr.Textbox(
                 label="Foydalanuvchi nomi (PGN uchun)",
                 placeholder="PGN dagi o'yinchi nomi (ixtiyoriy)",
-                info="Bo'sh qoldiring, avtomatik aniqlanadi"
             )
     
     analyze_btn = gr.Button("🔍 To'liq tahlil qilish", variant="primary", size="lg")

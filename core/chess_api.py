@@ -53,19 +53,42 @@ def get_user_games_from_chess_com(username):
         return None, f"❌ Xatolik: {str(e)}"
 
 
-def fetch_lichess_puzzles(themes, count=5):
+def fetch_lichess_puzzles(error_types, user_rating=1500, count=5):
+    """
+    Fetches relevant Lichess puzzles based on error types and user rating.
+    error_types: list of strings (e.g. ['hangingPiece', 'blunder'])
+    user_rating: int, target puzzle rating
+    count: int, number of puzzles to fetch
+    """
     puzzles = []
-    
     try:
-        url = "https://lichess.org/training"
-        for i in range(count):
-            puzzles.append({
-                'id': f'puzzle_{i+1}',
-                'url': url,
-                'theme': themes[0] if themes else 'Tactics',
-                'rating': 1500
-            })
+        # Lichess API: https://lichess.org/api/puzzle
+        # We'll use the public puzzle endpoint and filter locally
+        url = f"https://lichess.org/api/puzzle"
+        headers = {'Accept': 'application/x-ndjson'}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            logger.error("Failed to fetch puzzles from Lichess")
+            return puzzles
+
+        lines = response.text.strip().split('\n')
+        for line in lines:
+            if len(puzzles) >= count:
+                break
+            try:
+                puzzle = requests.utils.json.loads(line)
+                # Filter by rating and theme (error type)
+                if abs(puzzle.get('rating', 1500) - user_rating) <= 150:
+                    if any(theme in puzzle.get('themes', []) for theme in error_types):
+                        puzzles.append({
+                            'id': puzzle['id'],
+                            'url': f"https://lichess.org/training/{puzzle['id']}",
+                            'theme': ', '.join(puzzle.get('themes', [])),
+                            'rating': puzzle.get('rating', 1500),
+                            'fen': puzzle.get('fen', '')
+                        })
+            except Exception as e:
+                continue
     except Exception as e:
-        logger.error(f"Error generating puzzle links: {str(e)}")
-    
+        logger.error(f"Error fetching puzzles: {str(e)}")
     return puzzles
