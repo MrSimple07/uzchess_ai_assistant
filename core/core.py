@@ -8,11 +8,34 @@ from core.ai_integration import get_comprehensive_analysis
 from core.openings import detect_opening, load_opening_database
 from core.chess_api import get_user_games_from_chess_com, fetch_lichess_puzzles
 
-
+def extract_user_rating(games, username):
+    ratings = []
+    username_lower = username.strip().lower()
+    
+    for game in games:
+        white_player = game.headers.get("White", "").strip().lower()
+        black_player = game.headers.get("Black", "").strip().lower()
+        
+        if username_lower == white_player:
+            white_elo = game.headers.get("WhiteElo", "")
+            if white_elo and white_elo.isdigit():
+                ratings.append(int(white_elo))
+        
+        elif username_lower == black_player:
+            black_elo = game.headers.get("BlackElo", "")
+            if black_elo and black_elo.isdigit():
+                ratings.append(int(black_elo))
+    
+    if ratings:
+        avg_rating = sum(ratings) // len(ratings)
+        return avg_rating
+    
+    return 1500
 
 def analyze_games(username_chesscom, pgn_file, username_pgn):
     actual_username = None
     pgn_content = None
+    user_rating = 1500  # Default rating
 
     if username_chesscom:
         pgn_content, error = get_user_games_from_chess_com(username_chesscom)
@@ -44,6 +67,9 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
     
     if not games:
         return "❌ O'yinlar topilmadi yoki tahlil qilinmadi", "", "", "", None, None, None, None, None
+    
+    # Extract user rating from games
+    user_rating = extract_user_rating(games, actual_username)
     
     all_analyses = []
     opening_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0, 'total': 0})
@@ -83,6 +109,7 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
         all_mistakes.extend(analysis.get('mistakes', []))
     
     stats_report = f"## 📊 {len(games)} ta o'yin tahlili\n\n"
+    stats_report += f"**Sizning reytingingiz:** {user_rating}\n"
     stats_report += f"**Jami xatolar:** {len(all_mistakes)} ta\n\n"
     
     stats_report += "### 🎯 Eng zaif 3 tomoningiz:\n\n"
@@ -130,14 +157,15 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
     ai_report = f"## 🤖 AI Murabbiy: To'liq Tahlil va O'quv Rejasi\n\n{ai_analysis}"
     
     weakness_themes = [w['category'] for w in weaknesses[:3]]
-    puzzles = fetch_lichess_puzzles(weakness_themes, count=5)
+    puzzles = fetch_lichess_puzzles(weakness_themes, user_rating=user_rating, count=5)
     
     puzzle_text = "## 🧩 Sizning shaxsiy masalalaringiz\n\n"
-    puzzle_text += "Masalalarni yechish uchun quyidagi havoladan foydalaning:\n\n"
+    puzzle_text += f"Sizning reytingingiz: **{user_rating}** - Masalalar shu darajaga moslashtirilgan\n\n"
     for i, puzzle in enumerate(puzzles, 1):
         theme = puzzle.get('theme', 'Tactics')
+        rating = puzzle.get('rating', user_rating)
         url = puzzle.get('url', 'https://lichess.org/training')
-        puzzle_text += f"**Puzzle {i}: {theme}**\n"
+        puzzle_text += f"**Puzzle {i}: {theme}** (Rating: {rating})\n"
         puzzle_text += f"- [Lichess Training]({url})\n\n"
     
     return (
@@ -151,7 +179,6 @@ def analyze_games(username_chesscom, pgn_file, username_pgn):
         "",
         None
     )
-
 
 def parse_pgn_content(pgn_content):
     games = []

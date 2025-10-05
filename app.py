@@ -40,7 +40,7 @@ with gr.Blocks(title="Chess Study Plan Pro", theme=gr.themes.Soft()) as demo:
             )
             username_pgn = gr.Textbox(
                 label="Foydalanuvchi nomi (PGN uchun)",
-                placeholder="PGN dagi o'yinchi nomi (ixtiyoriy)",
+                placeholder="PGN dagi o'yinchi nomi",
             )
     
     analyze_btn = gr.Button("🔍 Tahlil qilish", variant="primary", size="lg")

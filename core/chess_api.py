@@ -58,7 +58,7 @@ def fetch_lichess_puzzles(error_types, user_rating=1500, count=5):
     
     # Map Uzbek error categories to Lichess puzzle themes
     theme_mapping = {
-        "Qo'pol xatolar": ["mate", "mateIn1", "mateIn2", "hangingPiece"],
+        "Qo'pol xatolar": ["crushing", "hangingPiece"],
         "Kichik xatolar": ["advantage", "crushing", "attackingF2F7"],
         "Himoyasiz qoldirish": ["hangingPiece", "pin", "skewer", "discoveredAttack"],
         "Debyut xatolari": ["opening", "middlegame"],
